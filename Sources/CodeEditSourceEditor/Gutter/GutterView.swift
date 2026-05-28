@@ -14,6 +14,7 @@ public protocol GutterViewDelegate: AnyObject {
 }
 
 /// A click on the gutter at a specific line.
+@MainActor
 public protocol GutterClickDelegate: AnyObject {
     /// Called when the user clicks the gutter, resolved to the line
     /// containing the click.
@@ -37,11 +38,12 @@ public enum GutterDecorationColumn: Sendable {
 
 /// Provides decorations to be drawn alongside line numbers in the
 /// gutter. Termos's diff-ribbon implementation is the v1 consumer.
+@MainActor
 public protocol GutterDecorationProvider: AnyObject {
     /// The column this provider draws into. Two providers must not
     /// claim the same column simultaneously — `assertionFailure` in
     /// debug, last-wins in release.
-    var column: GutterDecorationColumn { get }
+    nonisolated var column: GutterDecorationColumn { get }
 
     /// Draws decorations for a single visible line.
     /// - Parameters:

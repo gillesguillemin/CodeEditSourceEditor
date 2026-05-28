@@ -15,9 +15,12 @@ let package = Package(
     ],
     dependencies: [
         // A fast, efficient, text view for code.
+        // Forked locally so this package consumes the same fork that
+        // Termos itself pulls in — without this redirect, SwiftPM
+        // sees both `github.com/codeeditapp/codeedittextview` and
+        // `Vendor/CodeEditTextView` and refuses to resolve.
         .package(
-            url: "https://github.com/CodeEditApp/CodeEditTextView.git",
-            from: "0.12.1"
+            path: "../CodeEditTextView"
         ),
         // tree-sitter languages
         .package(
