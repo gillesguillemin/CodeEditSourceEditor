@@ -13,6 +13,44 @@ public protocol GutterViewDelegate: AnyObject {
     func gutterViewWidthDidUpdate()
 }
 
+/// A click on the gutter at a specific line.
+public protocol GutterClickDelegate: AnyObject {
+    /// Called when the user clicks the gutter, resolved to the line
+    /// containing the click.
+    /// - Parameters:
+    ///   - lineIndex: 0-based line index in the document.
+    ///   - point: The click location in gutter-local coordinates.
+    func gutterDidClick(lineIndex: Int, at point: NSPoint)
+}
+
+/// Where a gutter decoration is positioned within the gutter's
+/// horizontal column layout.
+public enum GutterDecorationColumn: Sendable {
+    /// Drawn between the leading edge and the line number.
+    case leadingOfLineNumber
+    /// Drawn between the line number and the folding ribbon.
+    case trailingOfLineNumber
+    /// Replaces the folding ribbon column entirely. Folding controls
+    /// are disabled while a provider holds this column.
+    case replacingFoldingRibbon
+}
+
+/// Provides decorations to be drawn alongside line numbers in the
+/// gutter. Termos's diff-ribbon implementation is the v1 consumer.
+public protocol GutterDecorationProvider: AnyObject {
+    /// The column this provider draws into. Two providers must not
+    /// claim the same column simultaneously — `assertionFailure` in
+    /// debug, last-wins in release.
+    var column: GutterDecorationColumn { get }
+
+    /// Draws decorations for a single visible line.
+    /// - Parameters:
+    ///   - lineIndex: 0-based line index in the document.
+    ///   - lineRect: The line's rect in gutter-local coordinates.
+    ///   - context: The drawing context.
+    func drawDecoration(lineIndex: Int, lineRect: CGRect, in context: CGContext)
+}
+
 /// The gutter view displays line numbers that match the text view's line indexes.
 /// This view is used as a scroll view's ruler view. It sits on top of the text view so text scrolls underneath the
 /// gutter if line wrapping is disabled.
@@ -83,6 +121,28 @@ public class GutterView: NSView {
 
     private weak var textView: TextView?
     private weak var delegate: GutterViewDelegate?
+    public weak var clickDelegate: GutterClickDelegate?
+
+    /// Providers that draw decorations alongside line numbers. Public
+    /// API for consumers like Termos to layer git-status ribbons,
+    /// breakpoints, blame markers, etc.
+    public var decorationProviders: [GutterDecorationProvider] = [] {
+        didSet {
+            #if DEBUG
+            // Debug-only: assert no two providers claim the same
+            // column. In release, last-wins.
+            var seen: Set<String> = []
+            for provider in decorationProviders {
+                let key = "\(provider.column)"
+                if seen.contains(key) {
+                    assertionFailure("Two GutterDecorationProviders claim column \(provider.column)")
+                }
+                seen.insert(key)
+            }
+            #endif
+            needsDisplay = true
+        }
+    }
     private var maxLineNumberWidth: CGFloat = 0
     /// The maximum number of digits found for a line number.
     private var maxLineLength: Int = 0
@@ -326,8 +386,72 @@ public class GutterView: NSView {
         context.saveGState()
         drawBackground(context, dirtyRect: dirtyRect)
         drawSelectedLines(context)
+        drawDecorations(context, dirtyRect: dirtyRect)
         drawLineNumbers(context, dirtyRect: dirtyRect)
         context.restoreGState()
+    }
+
+    /// Iterate visible lines once and broadcast to each registered
+    /// `GutterDecorationProvider`. The decorations draw between
+    /// `drawSelectedLines` (so selected-line highlight can show
+    /// through) and `drawLineNumbers` (so the line number text sits
+    /// on top of any leading-of-line-number ribbon).
+    private func drawDecorations(_ context: CGContext, dirtyRect: NSRect) {
+        guard !decorationProviders.isEmpty, let textView else { return }
+
+        context.saveGState()
+        context.clip(to: dirtyRect)
+
+        for linePosition in textView.layoutManager.linesStartingAt(dirtyRect.minY, until: dirtyRect.maxY) {
+            for provider in decorationProviders {
+                let xRange = decorationXRange(for: provider.column)
+                let lineRect = CGRect(
+                    x: xRange.lowerBound,
+                    y: linePosition.yPos,
+                    width: xRange.upperBound - xRange.lowerBound,
+                    height: linePosition.height
+                )
+                provider.drawDecoration(lineIndex: linePosition.index, lineRect: lineRect, in: context)
+            }
+        }
+        context.restoreGState()
+    }
+
+    /// Returns the x-range for a given decoration column. Used by
+    /// `drawDecorations` to construct each line's draw rect.
+    private func decorationXRange(for column: GutterDecorationColumn) -> Range<CGFloat> {
+        switch column {
+        case .leadingOfLineNumber:
+            // Between the leading edge inset and the line number text.
+            // Line numbers are right-aligned within
+            // [edgeInsets.leading, edgeInsets.leading + maxLineNumberWidth].
+            return 0..<edgeInsets.leading
+        case .trailingOfLineNumber:
+            // Between the line number column and the folding ribbon.
+            let lineNumEnd = edgeInsets.leading + maxLineNumberWidth
+            let foldStart = frame.width - edgeInsets.trailing - foldingRibbonWidth
+            return lineNumEnd..<foldStart
+        case .replacingFoldingRibbon:
+            // The folding-ribbon column. Caller is expected to set
+            // showFoldingRibbon = false separately.
+            let start = frame.width - edgeInsets.trailing - foldingRibbonWidth
+            return start..<(frame.width - edgeInsets.trailing)
+        }
+    }
+
+    // MARK: - Click handling
+
+    public override func mouseDown(with event: NSEvent) {
+        guard let clickDelegate, let textView else {
+            super.mouseDown(with: event)
+            return
+        }
+        let local = convert(event.locationInWindow, from: nil)
+        guard let linePos = textView.layoutManager.textLineForPosition(local.y) else {
+            super.mouseDown(with: event)
+            return
+        }
+        clickDelegate.gutterDidClick(lineIndex: linePos.index, at: local)
     }
 
     deinit {
