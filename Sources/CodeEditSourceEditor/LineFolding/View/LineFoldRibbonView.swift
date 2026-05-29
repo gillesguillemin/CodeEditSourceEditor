@@ -9,6 +9,24 @@ import Foundation
 import AppKit
 import CodeEditTextView
 
+/// Resolves a light/dark `NSColor` pair to a concrete `CGColor` without
+/// requiring an active drawing appearance.
+///
+/// Computing `.cgColor` on a *dynamic* `NSColor(light:dark:)` at init time —
+/// before the view is in a window with an appearance — throws
+/// `NSInvalidArgumentException: -colorSpaceName not valid`. These ribbon
+/// colors are stored-property defaults evaluated during `init`, and Termos
+/// hosts the editor's `NSViewController` via SwiftUI, which can create it
+/// outside any appearance context. We therefore pick the light/dark variant
+/// explicitly from the app's effective appearance and resolve the (concrete)
+/// underlying color to sRGB, which never needs an appearance.
+func foldRibbonCGColor(light: NSColor, dark: NSColor) -> CGColor {
+    let isDark = NSApplication.shared.effectiveAppearance
+        .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    let base = isDark ? dark : light
+    return (base.usingColorSpace(.sRGB) ?? base).cgColor
+}
+
 /// Displays the code folding ribbon in the ``GutterView``.
 ///
 /// This view draws its contents manually. This was chosen over managing views on a per-fold basis, which would come
@@ -40,40 +58,40 @@ class LineFoldRibbonView: NSView {
     var backgroundColor: NSColor = NSColor.controlBackgroundColor
 
     @Invalidating(.display)
-    var markerColor = NSColor(
+    var markerColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 0.0, alpha: 0.1),
         dark: NSColor(deviceWhite: 1.0, alpha: 0.2)
-    ).cgColor
+    )
 
     @Invalidating(.display)
-    var markerBorderColor = NSColor(
+    var markerBorderColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 1.0, alpha: 0.4),
         dark: NSColor(deviceWhite: 0.0, alpha: 0.4)
-    ).cgColor
+    )
 
     @Invalidating(.display)
-    var hoverFillColor = NSColor(
+    var hoverFillColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 1.0, alpha: 1.0),
         dark: NSColor(deviceWhite: 0.17, alpha: 1.0)
-    ).cgColor
+    )
 
     @Invalidating(.display)
-    var hoverBorderColor = NSColor(
+    var hoverBorderColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 0.8, alpha: 1.0),
         dark: NSColor(deviceWhite: 0.4, alpha: 1.0)
-    ).cgColor
+    )
 
     @Invalidating(.display)
-    var foldedIndicatorColor = NSColor(
+    var foldedIndicatorColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 0.0, alpha: 0.3),
         dark: NSColor(deviceWhite: 1.0, alpha: 0.6)
-    ).cgColor
+    )
 
     @Invalidating(.display)
-    var foldedIndicatorChevronColor = NSColor(
+    var foldedIndicatorChevronColor = foldRibbonCGColor(
         light: NSColor(deviceWhite: 1.0, alpha: 1.0),
         dark: NSColor(deviceWhite: 0.0, alpha: 1.0)
-    ).cgColor
+    )
 
     override public var isFlipped: Bool {
         true
